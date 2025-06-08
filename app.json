@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "Civic Watch",
+    "slug": "civic-watch",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f1419"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.civicwatch.mobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f1419"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.civicwatch.mobile"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "6bfa7e3f-a853-4667-862f-71188e5ecc21"
+      }
+    },
+    "owner": "civicwatch",
+    "plugins": [
+      "expo-secure-store",
+      "expo-location"
+    ]
+  }
+}
