@@ -67,15 +67,22 @@ class NotificationService {
   }
 
   async updateLastRunTime() {
-    await supabase
+    // Create a system record in a separate table or skip user_id for system events
+    const { error } = await supabase
       .from('notification_logs')
       .insert({
-        user_id: 'system',
-        notification_type: 'cron_run',
+        user_id: null, // We'll need to modify the table to allow null for system events
+        notification_type: 'cron_run', 
         title: 'Cron job executed',
         body: 'Notification check completed',
-        data: { timestamp: new Date().toISOString() }
+        data: { timestamp: new Date().toISOString() },
+        status: 'sent'
       });
+    
+    if (error) {
+      console.error('Error updating last run time:', error);
+      // Continue anyway - this shouldn't break the whole process
+    }
   }
 
   async checkBillUpdates() {
@@ -214,21 +221,31 @@ class NotificationService {
   async sendNotification(userId, notification) {
     try {
       // Get user's push tokens
-      const { data: tokens } = await supabase
+      const { data: tokens, error: tokenError } = await supabase
         .from('user_push_tokens')
         .select('push_token, platform')
         .eq('user_id', userId);
 
+      if (tokenError) {
+        console.error('Error fetching push tokens:', tokenError);
+      }
+
       // Log notification
-      await supabase
+      const { error: logError } = await supabase
         .from('notification_logs')
         .insert({
           user_id: userId,
-          notification_type: notification.data.type,
+          notification_type: notification.data?.type || 'unknown',
           title: notification.title,
           body: notification.body,
-          data: notification.data
+          data: notification.data || {},
+          status: 'sent'
         });
+
+      if (logError) {
+        console.error('Error logging notification:', logError);
+        // Continue anyway - logging failure shouldn't stop notification sending
+      }
 
       // Send push notifications via Expo
       for (const token of tokens || []) {
