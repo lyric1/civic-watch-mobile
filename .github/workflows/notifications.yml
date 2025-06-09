@@ -11,6 +11,7 @@ jobs:
   send-notifications:
     runs-on: ubuntu-latest
     name: Check for legislative updates and send notifications
+    environment: Dev
     
     steps:
       - name: 📥 Checkout repository

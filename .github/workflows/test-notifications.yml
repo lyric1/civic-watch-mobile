@@ -13,6 +13,7 @@ jobs:
   test-notifications:
     runs-on: ubuntu-latest
     name: Test notification system
+    environment: Dev
     
     steps:
       - name: 📥 Checkout repository
