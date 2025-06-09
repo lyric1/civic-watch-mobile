@@ -1,0 +1,53 @@
+name: 🧪 Test Notifications
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Run in test mode (limited notifications)'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  test-notifications:
+    runs-on: ubuntu-latest
+    name: Test notification system
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: scripts/package.json
+          
+      - name: 📦 Install dependencies
+        run: |
+          cd scripts
+          npm install
+          
+      - name: 🧪 Test notification service
+        run: |
+          cd scripts
+          echo "🔔 Testing notification service..."
+          echo "⚙️ Environment check:"
+          echo "SUPABASE_URL: ${SUPABASE_URL:+SET}"
+          echo "SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:+SET}"
+          echo "CONGRESS_API_KEY: ${CONGRESS_API_KEY:+SET}"
+          echo "OPENSTATES_API_KEY: ${OPENSTATES_API_KEY:+SET}"
+          echo ""
+          echo "🚀 Running notification check..."
+          node notification-cron.js
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
+          OPENSTATES_API_KEY: ${{ secrets.OPENSTATES_API_KEY }}
+          TEST_MODE: ${{ inputs.test_mode }}
+          
+      - name: ✅ Test completed
+        run: echo "🎉 Notification test completed successfully!" 

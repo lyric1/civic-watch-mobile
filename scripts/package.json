@@ -1,0 +1,16 @@
+{
+  "name": "civic-watch-notifications",
+  "version": "1.0.0",
+  "description": "Notification service for Civic Watch app",
+  "main": "notification-cron.js",
+  "scripts": {
+    "start": "node notification-cron.js",
+    "test": "node notification-cron.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "node-fetch": "^2.7.0"
+  },
+  "author": "Civic Watch",
+  "license": "MIT"
+} 

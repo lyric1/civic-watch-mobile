@@ -1,0 +1,47 @@
+name: 🔔 Send Push Notifications
+
+on:
+  schedule:
+    # Run every hour at the top of the hour
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    # Allow manual triggering for testing
+
+jobs:
+  send-notifications:
+    runs-on: ubuntu-latest
+    name: Check for legislative updates and send notifications
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: scripts/package.json
+          
+      - name: 📦 Install dependencies
+        run: |
+          cd scripts
+          npm install
+          
+      - name: 🔔 Run notification service
+        run: |
+          cd scripts
+          node notification-cron.js
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
+          OPENSTATES_API_KEY: ${{ secrets.OPENSTATES_API_KEY }}
+          
+      - name: 📊 Upload logs (if any failures)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notification-logs
+          path: scripts/*.log
+          retention-days: 7 
