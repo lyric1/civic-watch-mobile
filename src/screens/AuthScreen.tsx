@@ -17,6 +17,10 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [zip, setZip] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn, signUp } = useAuth();
 
@@ -36,11 +40,11 @@ export default function AuthScreen() {
           Alert.alert('Success', 'Check your email for a magic link!');
         }
       } else {
-        if (!password || !fullName) {
+        if (!password || !fullName || !address || !city || !state || !zip) {
           Alert.alert('Error', 'Please fill in all required fields');
           return;
         }
-        await signUp(email, password, fullName);
+        await signUp(email, password, fullName, address, city, state, zip);
         Alert.alert('Success', 'Account created! Please check your email to verify.');
       }
     } catch (error: any) {
@@ -69,13 +73,54 @@ export default function AuthScreen() {
           </Text>
 
           {!isLogin && (
-            <TextInput
-              style={styles.input}
-              placeholder="Full Name"
-              placeholderTextColor="#6b7280"
-              value={fullName}
-              onChangeText={setFullName}
-            />
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="Full Name"
+                placeholderTextColor="#6b7280"
+                value={fullName}
+                onChangeText={setFullName}
+              />
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Street Address"
+                placeholderTextColor="#6b7280"
+                value={address}
+                onChangeText={setAddress}
+              />
+              
+              <View style={styles.rowContainer}>
+                <TextInput
+                  style={[styles.input, styles.inputHalf]}
+                  placeholder="City"
+                  placeholderTextColor="#6b7280"
+                  value={city}
+                  onChangeText={setCity}
+                />
+                
+                <TextInput
+                  style={[styles.input, styles.inputQuarter]}
+                  placeholder="State"
+                  placeholderTextColor="#6b7280"
+                  value={state}
+                  onChangeText={setState}
+                  autoCapitalize="characters"
+                  maxLength={2}
+                />
+                
+                <TextInput
+                  style={[styles.input, styles.inputQuarter]}
+                  placeholder="ZIP"
+                  placeholderTextColor="#6b7280"
+                  value={zip}
+                  onChangeText={setZip}
+
+                  keyboardType="numeric"
+                  maxLength={5}
+                />
+              </View>
+            </>
           )}
 
           <TextInput
@@ -133,6 +178,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     padding: 20,
+    paddingBottom: 120, // Extra padding for safe area + potential bottom nav
   },
   header: {
     alignItems: 'center',
@@ -192,5 +238,18 @@ const styles = StyleSheet.create({
   switchButtonText: {
     color: '#3b5bdb',
     fontSize: 16,
+  },
+  rowContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  inputHalf: {
+    flex: 1,
+    marginRight: 5,
+  },
+  inputQuarter: {
+    flex: 0.3,
+    marginLeft: 5,
   },
 }); 

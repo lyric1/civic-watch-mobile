@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { notificationService } from '../services/notificationService';
 
 interface AuthContextType {
   user: User | null;
@@ -12,6 +13,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, fullName: string, address?: string, city?: string, state?: string, zip?: string) => Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
+  updateAddress: (address: string, city: string, state: string, zip: string) => Promise<void>;
 }
 
 interface UserProfile {
@@ -58,6 +60,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (session?.user) {
         await fetchUserProfile(session.user.id);
+        // Initialize notifications for authenticated user (gracefully handles Expo Go)
+        notificationService.initialize().then((initialized) => {
+          if (initialized) {
+            notificationService.registerPushToken(session.user.id);
+          }
+        }).catch((error) => {
+          console.log('Notification initialization skipped in development environment:', error.message);
+        });
       } else {
         setUserProfile(null);
         setLoading(false);
@@ -96,6 +106,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             email: user.email!,
             fullName: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
             isPro: false,
+            address: null,
+            city: null,
+            state: null,
+            zip: null,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           };
@@ -109,11 +123,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           if (createError) {
             console.error('Error creating user profile:', createError);
+            // Fallback: create a basic profile in state
             setUserProfile({
               id: userId,
               email: user.email!,
               fullName: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
               isPro: false,
+              address: null,
+              city: null,
+              state: null,
+              zip: null,
             });
           } else {
             console.log('User profile created successfully:', createdProfile);
@@ -218,6 +237,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUserProfile(prev => prev ? { ...prev, ...updates } : null);
   };
 
+  const updateAddress = async (address: string, city: string, state: string, zip: string) => {
+    if (!user) throw new Error('No user logged in');
+
+    const updates = { address, city, state, zip };
+    
+    // Try to update existing record first
+    const { error: updateError } = await supabase
+      .from('users')
+      .update(updates)
+      .eq('id', user.id);
+
+    if (updateError) {
+      // If update fails, try to insert a new record (in case the user doesn't exist in the table)
+      const { error: insertError } = await supabase
+        .from('users')
+        .insert({
+          id: user.id,
+          email: user.email!,
+          fullName: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+          isPro: false,
+          address,
+          city,
+          state,
+          zip,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+
+      if (insertError) {
+        console.error('Error creating/updating user profile:', insertError);
+        throw insertError;
+      }
+    }
+
+    // Update local state
+    setUserProfile(prev => prev ? { ...prev, ...updates } : {
+      id: user.id,
+      email: user.email!,
+      fullName: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+      isPro: false,
+      address,
+      city,
+      state,
+      zip,
+    });
+    
+    console.log('✅ Address updated successfully');
+  };
+
   const value = {
     user,
     session,
@@ -228,6 +296,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signUp,
     signOut,
     updateProfile,
+    updateAddress,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

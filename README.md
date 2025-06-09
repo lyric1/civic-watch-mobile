@@ -46,6 +46,12 @@ A React Native mobile application for tracking bills and representatives, built 
    EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
    ```
 
+4. **Set up the database:**
+   Run the database migrations to set up notification tables:
+   ```bash
+   npm run db:migrate
+   ```
+
 ## Development
 
 ### Running the App
@@ -157,6 +163,26 @@ The mobile app uses the same Supabase database as the web app:
 - `representatives` - Elected officials information
 - `user_tracked_bills` - Bills tracked by users
 - `user_tracked_representatives` - Representatives tracked by users
+- `user_push_tokens` - Device push notification tokens
+- `user_notification_preferences` - User notification settings
+- `notification_logs` - Notification event logging
+
+### Database Migrations
+
+The app includes proper database migrations using Supabase CLI:
+
+```bash
+# Deploy migrations
+npm run db:migrate
+
+# Check migration status  
+npm run db:status
+
+# Create a new migration
+npm run db:new migration_name
+```
+
+See `supabase/migrations/README.md` for detailed migration instructions.
 
 ## Styling
 

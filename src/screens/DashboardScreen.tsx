@@ -56,13 +56,16 @@ export default function DashboardScreen({ navigation }: any) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Mock address and district info - in real app this would come from user profile
-  const address = "12203 69th Ave, Palos Heights, IL 60464";
-  const districtInfo: DistrictInfo = {
-    congressional_district: "District 6",
-    state_house_district: "District 22", 
-    state_senate_district: "District 11"
-  };
+  // Get user address and district info from user profile
+  const address = userProfile?.address && userProfile?.city && userProfile?.state && userProfile?.zip
+    ? `${userProfile.address}, ${userProfile.city}, ${userProfile.state} ${userProfile.zip}`
+    : undefined;
+
+  const [districtInfo, setDistrictInfo] = useState<DistrictInfo>({
+    congressional_district: "",
+    state_house_district: "", 
+    state_senate_district: ""
+  });
 
   useEffect(() => {
     console.log('🔐 Dashboard useEffect - Auth state:', {
@@ -113,6 +116,7 @@ export default function DashboardScreen({ navigation }: any) {
       await Promise.all([
         loadBills(),
         loadRepresentatives(),
+        loadDistrictInfo(),
       ]);
     } catch (error) {
       console.error('❌ Error loading dashboard data:', error);
@@ -389,6 +393,88 @@ export default function DashboardScreen({ navigation }: any) {
     }
   };
 
+  const loadDistrictInfo = async () => {
+    console.log('🏛️ Loading district information...');
+    
+    if (!userProfile?.address || !userProfile?.city || !userProfile?.state || !userProfile?.zip) {
+      console.log('❌ Incomplete address information');
+      setDistrictInfo({
+        congressional_district: "",
+        state_house_district: "",
+        state_senate_district: ""
+      });
+      return;
+    }
+
+    try {
+      const fullAddress = `${userProfile.address}, ${userProfile.city}, ${userProfile.state} ${userProfile.zip}`;
+      console.log('🏠 Getting district info for address:', fullAddress);
+
+      // Get district info from Census API
+      const censusUrl = `https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress?address=${encodeURIComponent(fullAddress)}&benchmark=Public_AR_Current&vintage=Current_Current&format=json&layers=all`;
+      
+      const censusResponse = await fetch(censusUrl, {
+        headers: {
+          'User-Agent': 'CivicWatch/1.0'
+        }
+      });
+      
+      if (censusResponse.ok) {
+        const censusData = await censusResponse.json();
+        console.log('📊 Census API response for district info:', {
+          hasResult: !!censusData.result,
+          hasMatches: !!censusData.result?.addressMatches,
+          matchCount: censusData.result?.addressMatches?.length || 0
+        });
+        
+        if (censusData.result?.addressMatches?.length > 0) {
+          const match = censusData.result.addressMatches[0];
+          const geographies = match.geographies;
+          
+          let congressional_district = "";
+          
+          // Extract congressional district
+          if (geographies?.['119th Congressional Districts']?.[0]?.CD119) {
+            const cd = geographies['119th Congressional Districts'][0].CD119;
+            congressional_district = cd === '00' ? 'At-Large' : `District ${parseInt(cd, 10)}`;
+            console.log(`✅ Congressional District: ${congressional_district}`);
+          } else if (geographies?.['118th Congressional Districts']?.[0]?.CD118) {
+            const cd = geographies['118th Congressional Districts'][0].CD118;
+            congressional_district = cd === '00' ? 'At-Large' : `District ${parseInt(cd, 10)}`;
+            console.log(`✅ Congressional District (118th): ${congressional_district}`);
+          }
+          
+          setDistrictInfo({
+            congressional_district,
+            state_house_district: "", // TODO: Add state-level district fetching if needed
+            state_senate_district: ""
+          });
+        } else {
+          console.log('❌ No matches found in Census API');
+          setDistrictInfo({
+            congressional_district: "Unable to determine",
+            state_house_district: "",
+            state_senate_district: ""
+          });
+        }
+      } else {
+        console.log(`❌ Census API error: ${censusResponse.status}`);
+        setDistrictInfo({
+          congressional_district: "Error loading district",
+          state_house_district: "",
+          state_senate_district: ""
+        });
+      }
+    } catch (error) {
+      console.error('❌ Exception loading district info:', error);
+      setDistrictInfo({
+        congressional_district: "Error loading district",
+        state_house_district: "",
+        state_senate_district: ""
+      });
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadData();
@@ -436,7 +522,7 @@ export default function DashboardScreen({ navigation }: any) {
           <Text style={styles.headerTitle}>Your Dashboard</Text>
           <Text style={styles.headerSubtitle}>Welcome back, {userProfile?.fullName || 'User'}</Text>
         </View>
-        <TouchableOpacity style={styles.settingsButton} onPress={() => navigation.navigate('Settings')}>
+        <TouchableOpacity style={styles.settingsButton} onPress={() => navigation.getParent()?.navigate('Profile')}>
           <Ionicons name="settings" size={20} color="#9ca3af" />
         </TouchableOpacity>
       </View>
@@ -449,8 +535,18 @@ export default function DashboardScreen({ navigation }: any) {
       <View style={styles.infoContent}>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Congressional District:</Text>
-          <Text style={styles.infoValue}>{districtInfo.congressional_district || '6'}</Text>
+          <Text style={styles.infoValue}>
+            {districtInfo.congressional_district || (address ? 'Loading...' : 'Add address to see district')}
+          </Text>
         </View>
+        {!address && (
+          <TouchableOpacity 
+            style={styles.addAddressButton}
+            onPress={() => navigation.navigate('AddressSetup')}
+          >
+            <Text style={styles.addAddressButtonText}>Add Your Address</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -486,19 +582,21 @@ export default function DashboardScreen({ navigation }: any) {
   );
 
   const renderDistrictMap = () => {
-    // Extract user's address for the map
-    const addressParts = [
-      userProfile?.address,
-      userProfile?.city,
-      userProfile?.state,
-      userProfile?.zip
-    ].filter(Boolean);
-    const fullAddress = addressParts.length > 0 ? addressParts.join(', ') : address;
-    
+    // Only show map if user has address and district info
+    if (!address || !districtInfo.congressional_district) {
+      return (
+        <View style={styles.mapCard}>
+          <Text style={styles.mapPlaceholderText}>
+            {!address ? 'Add your address to view district map' : 'Loading district information...'}
+          </Text>
+        </View>
+      );
+    }
+
     return (
       <DistrictMap
-        userAddress={fullAddress}
-        districtNumber={districtInfo.congressional_district?.replace('District ', '') || '6'}
+        userAddress={address}
+        districtNumber={districtInfo.congressional_district.replace('District ', '')}
         stateCode={userProfile?.state?.toUpperCase() || 'IL'}
         style={styles.mapCard}
       />
@@ -563,9 +661,11 @@ export default function DashboardScreen({ navigation }: any) {
       {renderHeader()}
       
       {/* Address Display */}
-      <View style={styles.addressContainer}>
-        <Text style={styles.addressText}>{address}</Text>
-      </View>
+      {address && (
+        <View style={styles.addressContainer}>
+          <Text style={styles.addressText}>{address}</Text>
+        </View>
+      )}
       
       <View style={styles.content}>
         {/* Info Card */}
@@ -574,8 +674,8 @@ export default function DashboardScreen({ navigation }: any) {
         {/* Representatives Card */}
         {renderRepresentativesCard()}
 
-        {/* District Map */}
-        {renderDistrictMap()}
+        {/* District Map - Only show if Mapbox token is available */}
+        {(process.env.EXPO_PUBLIC_MAPBOX_TOKEN || process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN) && renderDistrictMap()}
       </View>
     </ScrollView>
   );
@@ -687,6 +787,14 @@ const styles = StyleSheet.create({
     borderWidth: 0, // remove border
     overflow: 'hidden',
     height: 200,
+  },
+  mapPlaceholderText: {
+    color: '#9ca3af',
+    fontSize: 16,
+    textAlign: 'center',
+    padding: 20,
+    alignSelf: 'center',
+    marginTop: 60,
   },
   loadingScreen: {
     flex: 1,
@@ -839,5 +947,18 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     paddingBottom: 100, // Add bottom padding to prevent content from being hidden behind the navigation bar
+  },
+  addAddressButton: {
+    backgroundColor: '#3b5bdb',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+    marginTop: 12,
+    alignSelf: 'flex-start',
+  },
+  addAddressButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 }); 

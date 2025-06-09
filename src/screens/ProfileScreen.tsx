@@ -10,7 +10,11 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 
-export default function ProfileScreen() {
+interface ProfileScreenProps {
+  navigation: any;
+}
+
+export default function ProfileScreen({ navigation }: ProfileScreenProps) {
   const { userProfile, signOut } = useAuth();
 
   const handleSignOut = async () => {
@@ -39,37 +43,43 @@ export default function ProfileScreen() {
       icon: 'person-outline',
       title: 'Edit Profile',
       subtitle: 'Update your personal information',
-      onPress: () => Alert.alert('Coming Soon', 'Profile editing will be available soon'),
+      onPress: () => navigation.navigate('EditProfile'),
     },
     {
       icon: 'location-outline',
       title: 'Address & Location',
       subtitle: 'Manage your address for representative tracking',
-      onPress: () => Alert.alert('Coming Soon', 'Address management will be available soon'),
+      onPress: () => navigation.navigate('AddressSetup'),
     },
     {
       icon: 'notifications-outline',
       title: 'Notifications',
       subtitle: 'Customize your alert preferences',
-      onPress: () => Alert.alert('Coming Soon', 'Notification settings will be available soon'),
+      onPress: () => navigation.navigate('Notifications'),
+    },
+    {
+      icon: 'flask-outline',
+      title: 'Test Notifications',
+      subtitle: 'Test different notification scenarios',
+      onPress: () => navigation.navigate('NotificationTest'),
     },
     {
       icon: 'card-outline',
       title: 'Subscription',
       subtitle: userProfile?.isPro ? 'Pro Account Active' : 'Upgrade to Pro',
-      onPress: () => Alert.alert('Coming Soon', 'Subscription management will be available soon'),
+      onPress: () => navigation.navigate('Subscription'),
     },
     {
       icon: 'help-outline',
       title: 'Help & Support',
       subtitle: 'Get help or contact support',
-      onPress: () => Alert.alert('Coming Soon', 'Help section will be available soon'),
+      onPress: () => navigation.navigate('HelpSupport'),
     },
     {
       icon: 'information-outline',
       title: 'About',
       subtitle: 'Learn more about Civic Watch',
-      onPress: () => Alert.alert('About Civic Watch', 'Civic Watch helps you stay engaged with your democracy by tracking bills and representatives.'),
+      onPress: () => navigation.navigate('About'),
     },
   ];
 

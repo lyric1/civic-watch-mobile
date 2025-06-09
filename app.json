@@ -37,8 +37,24 @@
     },
     "owner": "civicwatch",
     "plugins": [
+      "expo-dev-client",
       "expo-secure-store",
-      "expo-location"
-    ]
+      "expo-location",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#3b5bdb",
+          "defaultChannel": "default"
+        }
+      ]
+    ],
+    "notification": {
+      "icon": "./assets/notification-icon.png",
+      "color": "#3b5bdb",
+      "androidMode": "default",
+      "androidCollapsedTitle": "Civic Watch",
+      "iosDisplayInForeground": true
+    }
   }
 }

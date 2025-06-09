@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,8 +8,13 @@ import {
   Alert,
   Share,
   ActivityIndicator,
+  Linking,
+  Modal,
+  SafeAreaView,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { WebView } from 'react-native-webview';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import MemberCard from '../components/MemberCard';
@@ -47,6 +52,13 @@ interface Sponsor {
 interface Committee {
   name: string;
   chamber: string;
+}
+
+interface BillTextVersion {
+  date: string;
+  type: string;
+  url: string;
+  description: string;
 }
 
 // Add progress tracker component
@@ -369,6 +381,13 @@ export default function BillDetailScreen({ route, navigation }: any) {
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [committees, setCommittees] = useState<Committee[]>([]);
   const [actions, setActions] = useState<Array<{ date: string; action: string }>>([]);
+  const [billTextVersions, setBillTextVersions] = useState<BillTextVersion[]>([]);
+  const [showPdfViewer, setShowPdfViewer] = useState(false);
+  const [currentPdfUrl, setCurrentPdfUrl] = useState('');
+  const [currentOriginalUrl, setCurrentOriginalUrl] = useState('');
+  const [currentBillVersion, setCurrentBillVersion] = useState<BillTextVersion | null>(null);
+  const [readingProgress, setReadingProgress] = useState(0);
+  const webViewRef = useRef<any>(null);
 
   // Add deduplication function for actions
   const deduplicateActions = (actionsList: Array<{ date: string; action: string }>) => {
@@ -563,16 +582,63 @@ export default function BillDetailScreen({ route, navigation }: any) {
 
       setBill(billData);
       
-      // Set up committees data
-      if (apiBill.committees && apiBill.committees.length > 0) {
-        const committeesData = apiBill.committees.map((committee: any) => ({
+      // Debug: Check what committee data we have
+      console.log('🏛️ Raw committee data from API:', apiBill.committees);
+      console.log('🏛️ Committee data structure:', {
+        hasCommittees: !!apiBill.committees,
+        committeesLength: apiBill.committees?.length || 0,
+        firstCommittee: apiBill.committees?.[0]
+      });
+      
+      // Try to fetch committees from separate API endpoint since main endpoint might not include them
+      let committeesData: Committee[] = [];
+      
+      try {
+        console.log('🏛️ Fetching committees from separate API...');
+        const committeesUrl = `https://api.congress.gov/v3/bill/${congress}/${billType}/${billNumber}/committees?api_key=${apiKey}`;
+        console.log(`🌐 Committees API URL: ${committeesUrl.replace(apiKey, '[REDACTED]')}`);
+        
+        const committeesResponse = await fetch(committeesUrl);
+        console.log(`📡 Committees API response status: ${committeesResponse.status}`);
+        
+        if (committeesResponse.ok) {
+          const committeesApiData = await committeesResponse.json();
+          console.log('📊 Committees API response:', {
+            hasCommittees: !!committeesApiData.committees,
+            committeesCount: committeesApiData.committees?.length || 0,
+            firstFewCommittees: committeesApiData.committees?.slice(0, 3)
+          });
+          
+          if (committeesApiData.committees && committeesApiData.committees.length > 0) {
+            committeesData = committeesApiData.committees.map((committee: any) => ({
+              name: committee.name || 'Unknown Committee',
+              chamber: committee.chamber || billData.chamber
+            }));
+            console.log(`✅ Loaded ${committeesData.length} committees from separate API`);
+          }
+        } else {
+          console.log(`❌ Committees API error: ${committeesResponse.status}`);
+        }
+      } catch (committeesError) {
+        console.error('❌ Error fetching committees:', committeesError);
+      }
+      
+      // Fallback to main API data if separate endpoint failed
+      if (committeesData.length === 0 && apiBill.committees && apiBill.committees.length > 0) {
+        console.log('📊 Using committees from main bill API data');
+        committeesData = apiBill.committees.map((committee: any) => ({
           name: committee.name || 'Unknown Committee',
           chamber: committee.chamber || billData.chamber
         }));
-        setCommittees(committeesData);
-      } else {
-        setCommittees([{ name: 'Various Committees', chamber: billData.chamber }]);
       }
+      
+      // Final fallback if no committees found
+      if (committeesData.length === 0) {
+        console.log('⚠️ No committee data found, using fallback');
+        committeesData = [{ name: 'No committee information available', chamber: billData.chamber }];
+      }
+      
+      setCommittees(committeesData);
       
       // Set up sponsors data from API
       const sponsorsData: Sponsor[] = [];
@@ -789,6 +855,78 @@ export default function BillDetailScreen({ route, navigation }: any) {
         setActions(deduplicateActions(fallbackActions));
       }
 
+      // Fetch bill text versions
+      try {
+        console.log('📄 Fetching bill text versions...');
+        const textUrl = `https://api.congress.gov/v3/bill/${congress}/${billType}/${billNumber}/text?api_key=${apiKey}`;
+        console.log(`🌐 Text API URL: ${textUrl.replace(apiKey, '[REDACTED]')}`);
+        
+        const textResponse = await fetch(textUrl);
+        console.log(`📡 Text API response status: ${textResponse.status}`);
+        
+        if (textResponse.ok) {
+          const textData = await textResponse.json();
+          console.log('📊 Text API response:', {
+            hasTextVersions: !!textData.textVersions,
+            versionsCount: textData.textVersions?.length || 0
+          });
+          
+          if (textData.textVersions && textData.textVersions.length > 0) {
+            const versions: BillTextVersion[] = textData.textVersions.map((version: any) => {
+              console.log('📄 Processing version:', {
+                type: version.type,
+                formats: version.formats?.map((f: any) => ({ type: f.type, url: f.url?.substring(0, 50) + '...' })),
+                formatsCount: version.formats?.length
+              });
+              
+              // Look for PDF format first, then fallback to other formats
+              let pdfUrl = '';
+              if (version.formats && Array.isArray(version.formats)) {
+                // Find PDF format
+                const pdfFormat = version.formats.find((format: any) => 
+                  format.type?.toLowerCase() === 'pdf' || 
+                  format.url?.toLowerCase().includes('.pdf')
+                );
+                
+                if (pdfFormat) {
+                  pdfUrl = pdfFormat.url;
+                  console.log('✅ Found PDF format:', pdfUrl.substring(0, 50) + '...');
+                } else {
+                  // Fallback to first available format
+                  pdfUrl = version.formats[0]?.url || '';
+                  console.log('📄 Using fallback format:', pdfUrl.substring(0, 50) + '...');
+                }
+              } else {
+                pdfUrl = version.url || '';
+                console.log('📄 Using direct URL:', pdfUrl.substring(0, 50) + '...');
+              }
+
+              return {
+                date: version.date || new Date().toISOString(),
+                type: version.type || 'Unknown',
+                url: pdfUrl,
+                description: getVersionDescription(version.type) + (version.date ? ` (${formatDate(version.date)})` : '')
+              };
+            });
+            
+            // Sort by date (newest first)
+            versions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            
+            setBillTextVersions(versions);
+            console.log(`✅ Loaded ${versions.length} text versions`);
+          } else {
+            console.log('📝 No text versions found');
+            setBillTextVersions([]);
+          }
+        } else {
+          console.log(`❌ Text API error: ${textResponse.status}`);
+          setBillTextVersions([]);
+        }
+      } catch (textError) {
+        console.error('❌ Error fetching text versions:', textError);
+        setBillTextVersions([]);
+      }
+
     } catch (error) {
       console.error('❌ Error loading bill:', error);
       Alert.alert('Error', 'Failed to load bill details');
@@ -921,6 +1059,67 @@ export default function BillDetailScreen({ route, navigation }: any) {
     }
   };
 
+  const getVersionDescription = (type: string) => {
+    const versionTypes: { [key: string]: string } = {
+      'ih': 'Introduced in House',
+      'is': 'Introduced in Senate',
+      'eh': 'Engrossed in House',
+      'es': 'Engrossed in Senate',
+      'rh': 'Reported in House',
+      'rs': 'Reported in Senate',
+      'pp': 'Public Print',
+      'enr': 'Enrolled',
+      'eas': 'Engrossed Amendment Senate',
+      'eah': 'Engrossed Amendment House',
+      'ash': 'Additional Sponsors House',
+      'ats': 'Agreed to Senate',
+      'ath': 'Agreed to House',
+      'sc': 'Senate Committee Print',
+      'hc': 'House Committee Print',
+    };
+    
+    return versionTypes[type?.toLowerCase()] || `Version ${type}` || 'Bill Text';
+  };
+
+  const handleViewTextVersion = async (version: BillTextVersion) => {
+    if (!version.url) {
+      Alert.alert('Error', 'No URL available for this version');
+      return;
+    }
+
+    console.log('📄 Opening PDF viewer with URL:', version.url);
+    
+    // Store original URL for fallback
+    setCurrentOriginalUrl(version.url);
+    setCurrentBillVersion(version);
+    
+    // Always try direct URL first for better PDF rendering
+    setCurrentPdfUrl(version.url);
+    setShowPdfViewer(true);
+    setReadingProgress(0);
+  };
+
+  const handleDownloadTextVersion = async (version: BillTextVersion) => {
+    if (!version.url) {
+      Alert.alert('Error', 'No URL available for this version');
+      return;
+    }
+
+    try {
+      const supported = await Linking.canOpenURL(version.url);
+      if (supported) {
+        await Linking.openURL(version.url);
+      } else {
+        Alert.alert('Cannot Open', 'Unable to open this document');
+      }
+    } catch (error) {
+      console.error('Error opening URL:', error);
+      Alert.alert('Error', 'Failed to open document');
+    }
+  };
+
+
+
   const renderTabContent = () => {
     if (!bill) return null;
 
@@ -928,18 +1127,45 @@ export default function BillDetailScreen({ route, navigation }: any) {
       case 'summary':
         return (
           <View style={styles.summaryContent}>
-            <View style={styles.aiSummaryCard}>
-              <View style={styles.aiHeader}>
-                <View style={styles.aiIcon}>
-                  <Text style={styles.aiIconText}>AI</Text>
-                </View>
-                <Text style={styles.aiTitle}>AI Summary</Text>
-              </View>
+            <View style={styles.summaryCard}>
               <Text style={styles.summaryText}>{bill.summary}</Text>
             </View>
             
             {/* Add Progress Tracker */}
             <BillProgressTracker bill={bill} actions={actions} />
+            
+            {/* Bill Text Versions Section */}
+            {billTextVersions.length > 0 && (
+              <View style={styles.textVersionsSection}>
+                <Text style={styles.sectionTitle}>Bill Text Versions</Text>
+                                 {billTextVersions.map((version, index) => (
+                   <View key={`${version.type}-${version.date}-${index}`} style={styles.textVersionCard}>
+                     <View style={styles.textVersionHeader}>
+                       <View style={styles.textVersionInfo}>
+                         <Text style={styles.textVersionTitle} numberOfLines={2}>{version.description}</Text>
+                         <Text style={styles.textVersionDate}>{formatDate(version.date)}</Text>
+                       </View>
+                     </View>
+                     <View style={styles.textVersionActions}>
+                       <TouchableOpacity
+                         style={styles.textVersionButton}
+                         onPress={() => handleViewTextVersion(version)}
+                       >
+                         <Ionicons name="eye-outline" size={16} color="#3b5bdb" />
+                         <Text style={styles.textVersionButtonText}>View</Text>
+                       </TouchableOpacity>
+                       <TouchableOpacity
+                         style={styles.textVersionButton}
+                         onPress={() => handleDownloadTextVersion(version)}
+                       >
+                         <Ionicons name="download-outline" size={16} color="#3b5bdb" />
+                         <Text style={styles.textVersionButtonText}>Download</Text>
+                       </TouchableOpacity>
+                     </View>
+                   </View>
+                 ))}
+              </View>
+            )}
           </View>
         );
 
@@ -1010,6 +1236,34 @@ export default function BillDetailScreen({ route, navigation }: any) {
             {sponsors.length === 0 && (
               <View style={styles.emptyContainer}>
                 <Text style={styles.emptyText}>No sponsor information available</Text>
+              </View>
+            )}
+          </View>
+        );
+
+      case 'committees':
+        return (
+          <View style={styles.tabContent}>
+            <Text style={styles.sectionTitle}>Committees</Text>
+            {committees.length > 0 ? (
+              <View style={styles.committeesContainer}>
+                {committees.map((committee, index) => (
+                  <View key={`${committee.name}-${index}`} style={styles.committeeCard}>
+                    <View style={styles.committeeHeader}>
+                      <Ionicons name="business-outline" size={20} color="#3b5bdb" />
+                      <Text style={styles.committeeName}>{committee.name}</Text>
+                    </View>
+                    <Text style={styles.committeeChamber}>{committee.chamber}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="business-outline" size={48} color="#6b7280" />
+                <Text style={styles.emptyText}>No committee information available</Text>
+                <Text style={styles.emptySubtext}>
+                  Committee assignments may not be available for all bills
+                </Text>
               </View>
             )}
           </View>
@@ -1098,7 +1352,7 @@ export default function BillDetailScreen({ route, navigation }: any) {
             >
               <Ionicons 
                 name="document-text" 
-                size={16} 
+                size={14} 
                 color={activeTab === 'summary' ? '#ffffff' : '#9ca3af'} 
               />
               <Text style={[styles.tabText, activeTab === 'summary' && styles.activeTabText]}>
@@ -1112,11 +1366,25 @@ export default function BillDetailScreen({ route, navigation }: any) {
             >
               <Ionicons 
                 name="people" 
-                size={16} 
+                size={14} 
                 color={activeTab === 'sponsors' ? '#ffffff' : '#9ca3af'} 
               />
               <Text style={[styles.tabText, activeTab === 'sponsors' && styles.activeTabText]}>
                 Sponsors
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'committees' && styles.activeTab]}
+              onPress={() => setActiveTab('committees')}
+            >
+              <Ionicons 
+                name="business" 
+                size={14} 
+                color={activeTab === 'committees' ? '#ffffff' : '#9ca3af'} 
+              />
+              <Text style={[styles.tabText, activeTab === 'committees' && styles.activeTabText]}>
+                Committees
               </Text>
             </TouchableOpacity>
 
@@ -1126,7 +1394,7 @@ export default function BillDetailScreen({ route, navigation }: any) {
             >
               <Ionicons 
                 name="list" 
-                size={16} 
+                size={14} 
                 color={activeTab === 'timeline' ? '#ffffff' : '#9ca3af'} 
               />
               <Text style={[styles.tabText, activeTab === 'timeline' && styles.activeTabText]}>
@@ -1171,6 +1439,94 @@ export default function BillDetailScreen({ route, navigation }: any) {
           <Text style={styles.shareButtonText}>Share</Text>
         </TouchableOpacity>
       </View>
+
+      {/* PDF Viewer Modal */}
+      <Modal
+        visible={showPdfViewer}
+        animationType="slide"
+        presentationStyle="fullScreen"
+      >
+        <SafeAreaView style={styles.pdfModalContainer}>
+          <View style={styles.pdfHeader}>
+            <TouchableOpacity
+              style={styles.pdfCloseButton}
+              onPress={() => setShowPdfViewer(false)}
+            >
+              <Ionicons name="close" size={24} color="#ffffff" />
+            </TouchableOpacity>
+            <View style={styles.pdfHeaderInfo}>
+              <Text style={styles.pdfHeaderTitle}>
+                {bill?.number} - {currentBillVersion?.description || 'Bill Text'}
+              </Text>
+              {readingProgress > 0 && (
+                <View style={styles.progressBarContainer}>
+                  <View style={[styles.progressBar, { width: `${readingProgress}%` }]} />
+                </View>
+              )}
+            </View>
+            <View style={styles.pdfHeaderActions}>
+              <TouchableOpacity
+                style={styles.pdfActionButton}
+                onPress={() => {
+                  if (bill) {
+                    Share.share({
+                      message: `${bill.title}\n\n${currentBillVersion?.description}\n\n${currentOriginalUrl}`,
+                      title: `${bill.number} - Bill Text`,
+                    });
+                  }
+                }}
+              >
+                <Ionicons name="share-outline" size={20} color="#ffffff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+          
+
+          
+                     {currentPdfUrl ? (
+             <WebView
+               ref={webViewRef}
+               source={{ uri: currentPdfUrl }}
+               style={styles.pdfWebView}
+               startInLoadingState={true}
+               javaScriptEnabled={true}
+               domStorageEnabled={true}
+               allowsInlineMediaPlayback={true}
+               renderLoading={() => (
+                 <View style={styles.pdfLoadingContainer}>
+                   <ActivityIndicator size="large" color="#3b5bdb" />
+                   <Text style={styles.pdfLoadingText}>Loading document...</Text>
+                 </View>
+               )}
+               onError={(syntheticEvent) => {
+                 const { nativeEvent } = syntheticEvent;
+                 console.error('WebView error: ', nativeEvent);
+                 Alert.alert(
+                   'Document Load Error', 
+                   'Unable to load document in viewer. Would you like to open it externally?',
+                   [
+                     { text: 'Cancel', style: 'cancel' },
+                     { 
+                       text: 'Open Externally', 
+                       onPress: () => {
+                         setShowPdfViewer(false);
+                         Linking.openURL(currentOriginalUrl || currentPdfUrl);
+                       }
+                     }
+                   ]
+                 );
+               }}
+               onLoadEnd={() => {
+                 console.log('✅ PDF loaded successfully');
+               }}
+             />
+           ) : (
+             <View style={styles.pdfErrorContainer}>
+               <Text style={styles.pdfErrorText}>No document URL available</Text>
+             </View>
+           )}
+        </SafeAreaView>
+      </Modal>
     </View>
   );
 }
@@ -1237,26 +1593,26 @@ const styles = StyleSheet.create({
   },
   tabsContainer: {
     backgroundColor: '#151c2e', // navy
-    paddingBottom: 20,
+    paddingBottom: 16,
   },
   tabsContent: {
-    paddingHorizontal: 20,
-    gap: 8,
+    paddingHorizontal: 16,
+    gap: 4,
   },
   tab: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    gap: 4,
     backgroundColor: 'transparent',
   },
   activeTab: {
     backgroundColor: '#3b5bdb', // civic-blue
   },
   tabText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
     color: '#9ca3af',
   },
@@ -1506,5 +1862,261 @@ const styles = StyleSheet.create({
   },
   cosponsorsContainer: {
     gap: 12,
+  },
+  summaryCard: {
+    backgroundColor: '#1e2642', // navy-light
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20,
+  },
+  textVersionsSection: {
+    marginTop: 20,
+  },
+  textVersionCard: {
+    backgroundColor: '#1e2642', // navy-light
+    borderRadius: 12,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  textVersionHeader: {
+    padding: 16,
+  },
+  textVersionInfo: {
+    flex: 1,
+  },
+  textVersionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  textVersionDate: {
+    fontSize: 12,
+    color: '#9ca3af',
+  },
+  textVersionActions: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    justifyContent: 'center',
+  },
+  textVersionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(59, 91, 219, 0.1)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#3b5bdb',
+    gap: 4,
+  },
+  textVersionButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#3b5bdb',
+  },
+  // PDF Viewer Modal Styles
+  pdfModalContainer: {
+    flex: 1,
+    backgroundColor: '#151c2e',
+  },
+  pdfHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#1e2642',
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  pdfCloseButton: {
+    padding: 8,
+  },
+  pdfHeaderInfo: {
+    flex: 1,
+    marginHorizontal: 12,
+  },
+  pdfHeaderTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  pdfHeaderActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  pdfActionButton: {
+    padding: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  progressBar: {
+    height: 2,
+    backgroundColor: '#3b5bdb',
+    borderRadius: 1,
+  },
+  pdfWebView: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  pdfLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#151c2e',
+  },
+  pdfLoadingText: {
+    fontSize: 16,
+    color: '#9ca3af',
+    marginTop: 12,
+  },
+  pdfErrorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#151c2e',
+  },
+  pdfErrorText: {
+    fontSize: 16,
+    color: '#ef4444',
+  },
+  // Reading Tools Panel Styles
+  toolsPanel: {
+    position: 'absolute',
+    top: 72, // Below header
+    left: 0,
+    right: 0,
+    backgroundColor: '#1e2642',
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+    zIndex: 1000,
+    maxHeight: 160,
+  },
+  toolsSection: {
+    padding: 16,
+  },
+  toolsSectionTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 12,
+  },
+  toolRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  toolLabel: {
+    fontSize: 14,
+    color: '#d1d5db',
+    fontWeight: '500',
+  },
+  fontControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  fontButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#3b5bdb',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fontSizeText: {
+    fontSize: 14,
+    color: '#ffffff',
+    fontWeight: '600',
+    minWidth: 40,
+    textAlign: 'center',
+  },
+  quickJumpSection: {
+    marginTop: 4,
+  },
+  quickJumpScroll: {
+    marginTop: 8,
+  },
+  quickJumpButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#374151',
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  quickJumpText: {
+    fontSize: 12,
+    color: '#d1d5db',
+    fontWeight: '500',
+  },
+  // PDF Notice and Disabled States
+  pdfNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+  },
+  pdfNoticeText: {
+    fontSize: 12,
+    color: '#f59e0b',
+    fontWeight: '500',
+    flex: 1,
+    lineHeight: 16,
+  },
+  disabledTool: {
+    opacity: 0.5,
+  },
+  disabledText: {
+    color: '#6b7280',
+  },
+  disabledButton: {
+    backgroundColor: '#374151',
+    opacity: 0.6,
+  },
+  // Committees Tab Styles
+  committeesContainer: {
+    gap: 12,
+  },
+  committeeCard: {
+    backgroundColor: '#1e2642', // navy-light
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  committeeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  committeeName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    flex: 1,
+    flexWrap: 'wrap',
+  },
+  committeeChamber: {
+    fontSize: 14,
+    color: '#9ca3af',
+    fontWeight: '500',
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
   },
 }); 

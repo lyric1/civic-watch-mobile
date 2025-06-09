@@ -1,12 +1,12 @@
 const { createClient } = require('@supabase/supabase-js');
-require('dotenv').config();
+require('dotenv').config({ path: '.env.local' });
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 console.log('🔍 Testing Supabase connection...');
 console.log('Supabase URL:', supabaseUrl ? 'Set' : 'Not set');
-console.log('Supabase Key:', supabaseKey ? 'Set (length: ' + supabaseKey?.length + ')' : 'Not set');
+console.log('Supabase Key:', supabaseKey ? `Set (length: ${supabaseKey.length})` : 'Not set');
 
 if (!supabaseUrl || !supabaseKey) {
   console.error('❌ Supabase environment variables not set');
@@ -46,6 +46,34 @@ async function testDatabase() {
     }
   } catch (e) {
     console.log('Representatives table: ❌ Error -', e.message);
+  }
+
+  // Test for district boundaries tables
+  const potentialTables = [
+    'district_boundaries',
+    'congressional_districts', 
+    'districts',
+    'boundaries',
+    'geojson_districts',
+    'district_shapes',
+    'political_boundaries'
+  ];
+
+  console.log('\n🗺️ Checking for district boundary tables...');
+  for (const tableName of potentialTables) {
+    try {
+      const { data, error } = await supabase.from(tableName).select('*').limit(1);
+      if (!error && data !== null) {
+        console.log(`${tableName} table: ✅ Found (${data?.length || 0} records)`);
+        if (data && data.length > 0) {
+          console.log(`${tableName} columns:`, Object.keys(data[0]));
+        }
+      } else if (error && !error.message.includes('does not exist')) {
+        console.log(`${tableName} table: ❌ ${error.message}`);
+      }
+    } catch (e) {
+      // Table doesn't exist, continue
+    }
   }
 
   // Count records in each table
